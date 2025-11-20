@@ -3,7 +3,7 @@ import sys
 import pwd  # check if user exists (reads /etc/passwd)
 import re   # for username validation
 import getpass  # to get current username
-
+import grp          # check if group exists (reads /etc/group)
 
 def show_menu():
     print("\n=== Linux User & Permission Manager ===")
@@ -11,7 +11,14 @@ def show_menu():
     print("2. Check if a user exists")
     print("3. Create new user")
     print("4. Delete user")
-    print("5. Exit")
+    print("5. List all groups")  
+    print("6. Check if a group exists")
+    print("7. Create new group")
+    print("8. Delete group")
+    print("9. Add user to group")
+    print("10. Remove user from group")
+    print("11. Exit")
+
 
 
 def list_users(): #List all users in the system.
@@ -129,6 +136,184 @@ def delete_user():
         print("Failed to delete user.")
         print("   Error:", e)
 
+def list_groups():
+    """List all groups in the system."""
+    print("\n--- System Groups ---")
+    subprocess.run(["getent", "group"])
+
+
+def group_exists(groupname: str) -> bool:
+    """Return True if the group exists in the system."""
+    try:
+        grp.getgrnam(groupname)
+        return True
+    except KeyError:
+        return False
+
+
+def check_group(): #Check if a group exists.
+    groupname = input("Enter group name to check: ").strip()
+
+    if not groupname:
+        print("Please enter a group name.")
+        return
+
+    if group_exists(groupname):
+        g = grp.getgrnam(groupname)
+        print(f"Group '{groupname}' exists. GID={g.gr_gid}, members={g.gr_mem}")
+    else:
+        print(f"Group '{groupname}' does NOT exist.")
+
+
+def create_group():
+    groupname = input("Enter NEW group name to create: ").strip()
+
+    if not groupname:
+        print("Group name cannot be empty!")
+        return
+
+    if not validate_username(groupname):
+        print("Invalid group name!")
+        print("  - must start with a lowercase letter or underscore")
+        print("  - can contain lowercase letters, digits, underscore, hyphen")
+        print("  - max length = 32 characters")
+        return
+
+    if group_exists(groupname):
+        print(f"Group '{groupname}' already exists!")
+        return
+
+    print(f"About to create group: {groupname}")
+    confirm = input("Proceed? (y/N): ").strip().lower()
+
+    if confirm != "y":
+        print("Cancelled.")
+        return
+
+    try:
+        subprocess.run(
+            ["sudo", "groupadd", groupname],
+            check=True
+        )
+        print(f"Group '{groupname}' created successfully.")
+    except subprocess.CalledProcessError as e:
+        print("Failed to create group.")
+        print("   Error:", e)
+
+
+def delete_group():
+    groupname = input("Enter group name to DELETE: ").strip()
+
+    if not groupname:
+        print("Group name cannot be empty.")
+        return
+
+    if not group_exists(groupname):
+        print(f"Group '{groupname}' does NOT exist.")
+        return
+
+    if groupname in ["root", "sudo", "adm"]:
+        print(f"Refusing to delete important group '{groupname}'.")
+        return
+
+    g = grp.getgrnam(groupname)
+    members = g.gr_mem
+
+    if members:
+        print(f"Group '{groupname}' still has members: {members}")
+        print("Please remove members from this group first.")
+        return
+
+    print(f"About to DELETE group: {groupname}")
+    confirm = input("Type the group name again to confirm: ").strip()
+
+    if confirm != groupname:
+        print("Confirmation mismatch. Cancelled.")
+        return
+
+    final = input("Are you SURE? This will remove the group (y/N): ").strip().lower()
+    if final != "y":
+        print("Cancelled.")
+        return
+
+    try:
+        subprocess.run(
+            ["sudo", "groupdel", groupname],
+            check=True
+        )
+        print(f"Group '{groupname}' deleted successfully.")
+    except subprocess.CalledProcessError as e:
+        print("Failed to delete group.")
+        print("   Error:", e)
+
+
+def add_user_to_group(): #Add an existing user to an existing group.
+    username = input("Enter username: ").strip()
+    groupname = input("Enter group name: ").strip()
+
+    if not username or not groupname:
+        print("Username and group name cannot be empty.")
+        return
+
+    if not user_exists(username):
+        print(f"User '{username}' does NOT exist.")
+        return
+
+    if not group_exists(groupname):
+        print(f"Group '{groupname}' does NOT exist.")
+        return
+
+    print(f"About to add user '{username}' to group '{groupname}'")
+    confirm = input("Proceed? (y/N): ").strip().lower()
+
+    if confirm != "y":
+        print("Cancelled.")
+        return
+
+    try:
+        subprocess.run(
+            ["sudo", "usermod", "-aG", groupname, username],
+            check=True
+        )
+        print(f"User '{username}' added to group '{groupname}' successfully.")
+    except subprocess.CalledProcessError as e:
+        print("Failed to add user to group.")
+        print("   Error:", e)
+
+
+def remove_user_from_group():
+    username = input("Enter username: ").strip()
+    groupname = input("Enter group name: ").strip()
+
+    if not username or not groupname:
+        print("Username and group name cannot be empty.")
+        return
+
+    if not user_exists(username):
+        print(f"User '{username}' does NOT exist.")
+        return
+
+    if not group_exists(groupname):
+        print(f"Group '{groupname}' does NOT exist.")
+        return
+
+    print(f"About to REMOVE user '{username}' from group '{groupname}'")
+    confirm = input("Proceed? (y/N): ").strip().lower()
+
+    if confirm != "y":
+        print("Cancelled.")
+        return
+
+    try:
+        subprocess.run(
+            ["sudo", "gpasswd", "-d", username, groupname],
+            check=True
+        )
+        print(f"User '{username}' removed from group '{groupname}' successfully.")
+    except subprocess.CalledProcessError as e:
+        print("Failed to remove user from group.")
+        print("   Error:", e)
+
 if __name__ == "__main__":
     while True:
         show_menu()
@@ -143,6 +328,18 @@ if __name__ == "__main__":
         elif choice == "4":
             delete_user()
         elif choice == "5":
+            list_groups()
+        elif choice == "6":
+            check_group()
+        elif choice == "7":
+            create_group()
+        elif choice == "8":
+            delete_group()
+        elif choice == "9":
+            add_user_to_group()
+        elif choice == "10":
+            remove_user_from_group()
+        elif choice == "11":
             print("Goodbye")
             sys.exit(0)
         else:
