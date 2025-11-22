@@ -4,6 +4,8 @@ import pwd  # check if user exists (reads /etc/passwd)
 import re   # for username validation
 import getpass  # to get current username
 import grp          # check if group exists (reads /etc/group)
+import os
+import stat
 
 def show_menu():
     print("\n=== Linux User & Permission Manager ===")
@@ -17,7 +19,10 @@ def show_menu():
     print("8. Delete group")
     print("9. Add user to group")
     print("10. Remove user from group")
-    print("11. Exit")
+    print("11. Show file/dir info")
+    print("12. Change file/dir permission (chmod)")
+    print("13. Change file owner/group (chown)")
+    print("14. Exit")
 
 
 
@@ -314,6 +319,145 @@ def remove_user_from_group():
         print("Failed to remove user from group.")
         print("   Error:", e)
 
+
+def mode_to_rwx(mode: int) -> str: #Convert permission bits to rwxrwxrwx string.
+    perms = []
+    for who in [stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR,
+                stat.S_IRGRP | stat.S_IWGRP | stat.S_IXGRP,
+                stat.S_IROTH | stat.S_IWOTH | stat.S_IXOTH]:
+        r = "r" if mode & (who & (stat.S_IRUSR | stat.S_IRGRP | stat.S_IROTH)) else "-"
+        w = "w" if mode & (who & (stat.S_IWUSR | stat.S_IWGRP | stat.S_IWOTH)) else "-"
+        x = "x" if mode & (who & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)) else "-"
+        perms.append(r + w + x)
+    return "".join(perms)
+
+
+def show_file_info(): #Show owner, group, permission of a file/directory.
+    path = input("Enter file or directory path: ").strip()
+
+    if not path:
+        print("Path cannot be empty.")
+        return
+
+    if not os.path.exists(path):
+        print(f"Path '{path}' does NOT exist.")
+        return
+
+    st = os.stat(path)
+
+    try:
+        owner = pwd.getpwuid(st.st_uid).pw_name
+    except KeyError:
+        owner = f"UID {st.st_uid}"
+
+    try:
+        group = grp.getgrgid(st.st_gid).gr_name
+    except KeyError:
+        group = f"GID {st.st_gid}"
+
+    # type
+    if stat.S_ISDIR(st.st_mode):
+        ftype = "directory"
+    elif stat.S_ISREG(st.st_mode):
+        ftype = "regular file"
+    else:
+        ftype = "other"
+
+    perm_bits = stat.S_IMODE(st.st_mode)
+    perm_rwx = mode_to_rwx(perm_bits)
+    perm_oct = oct(perm_bits)[-3:]  # last 3 digits, e.g. '755'
+
+    print("\n--- File Info ---")
+    print(f"Path     : {path}")
+    print(f"Type     : {ftype}")
+    print(f"Owner    : {owner}")
+    print(f"Group    : {group}")
+    print(f"Perm (rwx): {perm_rwx}")
+    print(f"Perm (oct): {perm_oct}")
+    print("-----------------\n")
+
+def change_file_permission(): #Change file/dir permission using numeric chmod (e.g. 644, 755).
+    path = input("Enter file or directory path: ").strip()
+
+    if not path:
+        print("Path cannot be empty.")
+        return
+
+    if not os.path.exists(path):
+        print(f"Path '{path}' does NOT exist.")
+        return
+
+    mode_str = input("Enter new permission (3-digit octal, e.g. 644, 755): ").strip()
+
+    if not re.match(r'^[0-7]{3}$', mode_str):
+        print("Invalid permission format. Use 3 digits (0-7), e.g. 644, 755.")
+        return
+
+    mode = int(mode_str, 8)
+
+    print(f"About to change permission of '{path}' to {mode_str}")
+    confirm = input("Proceed? (y/N): ").strip().lower()
+    if confirm != "y":
+        print("Cancelled.")
+        return
+
+    try:
+        os.chmod(path, mode)
+        print(f"Permission of '{path}' changed to {mode_str} successfully.")
+    except PermissionError as e:
+        print("Permission denied. Try running the script with sudo.")
+        print("   Error:", e)
+    except OSError as e:
+        print("Failed to change permission.")
+        print("   Error:", e)
+
+
+def change_file_owner_group(): #Change owner/group of a file or directory (using sudo chown).
+    path = input("Enter file or directory path: ").strip()
+    if not path:
+        print("Path cannot be empty.")
+        return
+
+    if not os.path.exists(path):
+        print(f"Path '{path}' does NOT exist.")
+        return
+
+    username = input("Enter new owner username (leave blank to keep current): ").strip()
+    groupname = input("Enter new group name (leave blank to keep current): ").strip()
+
+    # validate user/group if provided
+    if username and not user_exists(username):
+        print(f"User '{username}' does NOT exist.")
+        return
+
+    if groupname and not group_exists(groupname):
+        print(f"Group '{groupname}' does NOT exist.")
+        return
+
+    # Build chown target string
+    if username and groupname:
+        target = f"{username}:{groupname}"
+    elif username:
+        target = username
+    elif groupname:
+        target = f":{groupname}"
+    else:
+        print("Nothing to change (no user or group provided).")
+        return
+
+    print(f"About to change owner/group of '{path}' to '{target}'")
+    confirm = input("Proceed? (y/N): ").strip().lower()
+    if confirm != "y":
+        print("Cancelled.")
+        return
+
+    try:
+        subprocess.run(["sudo", "chown", target, path], check=True)
+        print(f"Owner/group of '{path}' changed to '{target}' successfully.")
+    except subprocess.CalledProcessError as e:
+        print("Failed to change owner/group.")
+        print("   Error:", e)
+
 if __name__ == "__main__":
     while True:
         show_menu()
@@ -340,6 +484,12 @@ if __name__ == "__main__":
         elif choice == "10":
             remove_user_from_group()
         elif choice == "11":
+            show_file_info()
+        elif choice == "12":
+            change_file_permission()
+        elif choice == "13":
+            change_file_owner_group()
+        elif choice == "14":
             print("Goodbye")
             sys.exit(0)
         else:
